@@ -3,6 +3,7 @@ import time
 import vlc
 
 API_BASE = "http://127.0.0.1:8000"
+
 def fetch_queue():
     try:
         res = requests.get(f"{API_BASE}/api/player/queue", timeout=8)
@@ -54,14 +55,15 @@ def main_loop():
     while True:
         queue = fetch_queue()
         if not queue:
-            print("队列为空，等待10秒")
+            print("队列为空，等待10秒...")
             time.sleep(10)
             continue
         song = queue[0]
         url = fetch_url(song["song_id"])
         if not url:
-            print("无法获取播放地址，跳过")
-            mark_played(song["request_id"])  # 标记为已播放，避免死循环
+            print("无法获取播放地址，标记已播放并跳过")
+            mark_played(song["request_id"])
+            time.sleep(2)
             continue
         play_stream(url)
         mark_played(song["request_id"])
