@@ -240,11 +240,13 @@ class MusicPlayer:
         if self.is_playing:
             self.player.pause()
             self.is_playing = False
+            self.should_run = False
             self.play_pause_button.config(text="播放")
             self.status_var.set("已暂停")
         else:
             self.player.play()
             self.is_playing = True
+            self.should_run = True
             self.play_pause_button.config(text="暂停")
             self.status_var.set("正在播放")
     
