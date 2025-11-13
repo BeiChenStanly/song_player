@@ -7,13 +7,20 @@ import threading
 import os
 from tkinter import messagebox
 import sys
-
+from dotenv import load_dotenv
+load_dotenv()
 # 获取脚本所在目录
 script_dir = os.path.dirname(os.path.abspath(__file__))
 # 颁奖音乐文件路径
 AWARD_MUSIC_PATH = os.path.join(script_dir, "award.mp3")
 
 API_BASE = "http://127.0.0.1:8000"
+PLAYER_TOKEN = os.getenv("PLAYER_ACCESS_TOKEN")
+
+
+def _player_headers():
+    """构建播放器认证所需的请求头"""
+    return {"X-Player-Token": PLAYER_TOKEN}
 
 class MusicPlayer:
     def __init__(self, root):
@@ -22,6 +29,15 @@ class MusicPlayer:
         self.root.geometry("500x300")
         self.root.resizable(True, True)
         
+        # 校验播放器访问令牌
+        if not PLAYER_TOKEN:
+            messagebox.showerror(
+                "配置错误",
+                "未检测到播放器访问令牌。请设置环境变量 PLAYER_ACCESS_TOKEN 后重新启动。"
+            )
+            root.destroy()
+            sys.exit(1)
+
         # 设置窗口图标（如果有的话）
         try:
             self.root.iconbitmap(os.path.join(script_dir, "icon.ico"))
@@ -141,7 +157,11 @@ class MusicPlayer:
     def check_server_connection(self):
         """检查服务器连接状态"""
         try:
-            response = requests.get(f"{API_BASE}/api/player/queue", timeout=3)
+            response = requests.get(
+                f"{API_BASE}/api/player/queue",
+                timeout=3,
+                headers=_player_headers()
+            )
             if response.status_code == 200:
                 self.server_status_var.set("服务器: 已连接")
             else:
@@ -375,7 +395,11 @@ class MusicPlayer:
 def fetch_queue():
     """获取待播放队列"""
     try:
-        res = requests.get(f"{API_BASE}/api/player/queue", timeout=8)
+        res = requests.get(
+            f"{API_BASE}/api/player/queue",
+            timeout=8,
+            headers=_player_headers()
+        )
         return res.json().get("queue", [])
     except Exception as e:
         print("获取队列失败：", e)
@@ -394,7 +418,12 @@ def fetch_url(song_id):
 def mark_played(request_id):
     """标记歌曲为已播放"""
     try:
-        res = requests.post(f"{API_BASE}/api/player/played", json={"request_id": request_id}, timeout=8)
+        res = requests.post(
+            f"{API_BASE}/api/player/played",
+            json={"request_id": request_id},
+            timeout=8,
+            headers=_player_headers()
+        )
         return res.json().get("success", False)
     except Exception as e:
         print("标记已播放失败：", e)
