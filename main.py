@@ -8,37 +8,28 @@ import os
 from tkinter import messagebox
 import sys
 from dotenv import load_dotenv
+from azure.cosmos import CosmosClient, PartitionKey
 load_dotenv()
 # 获取脚本所在目录
 script_dir = os.path.dirname(os.path.abspath(__file__))
 # 颁奖音乐文件路径
 AWARD_MUSIC_PATH = os.path.join(script_dir, "award.mp3")
+endpoint = os.getenv('ENDPOINT')
+key = os.getenv('KEY')
+API_BASE = os.getenv('API_BASE')
+client = CosmosClient(endpoint, key)
 
-API_BASE = "http://127.0.0.1:8000"
-PLAYER_TOKEN = os.getenv("PLAYER_ACCESS_TOKEN")
-
-
-def _player_headers():
-    """构建播放器认证所需的请求头"""
-    return {"X-Player-Token": PLAYER_TOKEN}
-
+database = client.create_database_if_not_exists(id="ours")
+con_song = database.create_container_if_not_exists(
+    id="song", partition_key=PartitionKey(path="/status")
+)
 class MusicPlayer:
     def __init__(self, root):
         self.root = root
         self.root.title("校园点歌系统播放器")
         self.root.geometry("500x300")
         self.root.resizable(True, True)
-        
-        # 校验播放器访问令牌
-        if not PLAYER_TOKEN:
-            messagebox.showerror(
-                "配置错误",
-                "未检测到播放器访问令牌。请设置环境变量 PLAYER_ACCESS_TOKEN 后重新启动。"
-            )
-            root.destroy()
-            sys.exit(1)
 
-        # 设置窗口图标（如果有的话）
         try:
             self.root.iconbitmap(os.path.join(script_dir, "icon.ico"))
         except:
@@ -150,27 +141,7 @@ class MusicPlayer:
         self.server_status_var = tk.StringVar(value="服务器: 未连接")
         server_status = ttk.Label(status_bar, textvariable=self.server_status_var, font=("Arial", 9))
         server_status.pack(side=tk.LEFT)
-        
-        # 更新服务器状态
-        self.check_server_connection()
     
-    def check_server_connection(self):
-        """检查服务器连接状态"""
-        try:
-            response = requests.get(
-                f"{API_BASE}/api/player/queue",
-                timeout=3,
-                headers=_player_headers()
-            )
-            if response.status_code == 200:
-                self.server_status_var.set("服务器: 已连接")
-            else:
-                self.server_status_var.set("服务器: 连接错误")
-        except:
-            self.server_status_var.set("服务器: 无法连接")
-        
-        # 每30秒检查一次
-        self.root.after(30000, self.check_server_connection)
     
     def toggle_award_mode(self):
         """切换颁奖模式"""
@@ -281,12 +252,7 @@ class MusicPlayer:
             self.player.stop()
             
             # 标记为已播放
-            if self.current_song.get("request_id"):
-                threading.Thread(
-                    target=mark_played,
-                    args=(self.current_song["request_id"],)
-                ).start()
-            
+            mark_played(self.current_song)
             self.current_song = None
     
     def refresh_queue(self):
@@ -324,8 +290,7 @@ class MusicPlayer:
                 
                 # 如果播放结束，移除当前歌曲并继续
                 if state in [vlc.State.Ended, vlc.State.Stopped, vlc.State.Error]:
-                    if self.current_song.get("request_id"):
-                        mark_played(self.current_song["request_id"])
+                    mark_played(self.current_song)
                     
                     self.current_song = None
                     self.root.after(0, lambda: self.now_playing_var.set("等待下一首..."))
@@ -346,15 +311,15 @@ class MusicPlayer:
             
             # 获取下一首歌
             song = queue[0]
-            self.root.after(0, lambda: self.status_var.set(f"正在加载歌曲 ID: {song['song_id']}"))
+            self.root.after(0, lambda: self.status_var.set(f"正在加载歌曲 ID: {song['sid']}"))
             
             # 获取播放地址
-            url = fetch_url(song["song_id"])
+            url = fetch_url(song["sid"])
             
             if not url:
                 # 无法获取播放地址，标记已播放并跳过
                 self.root.after(0, lambda: self.status_var.set("无法获取播放地址，跳过"))
-                mark_played(song["request_id"])
+                mark_played(song)
                 time.sleep(2)
                 continue
             
@@ -372,7 +337,7 @@ class MusicPlayer:
             # 等待媒体加载并获取元数据
             time.sleep(1.5)
             
-            media_title = media.get_meta(vlc.Meta.Title) or f"歌曲 #{song['song_id']}"
+            media_title = media.get_meta(vlc.Meta.Title) or f"歌曲 #{song['sid']}"
             self.root.after(0, lambda: self.now_playing_var.set(f"正在播放: {media_title}"))
             self.root.after(0, lambda: self.status_var.set("播放中"))
             
@@ -395,12 +360,11 @@ class MusicPlayer:
 def fetch_queue():
     """获取待播放队列"""
     try:
-        res = requests.get(
-            f"{API_BASE}/api/player/queue",
-            timeout=8,
-            headers=_player_headers()
+        query = (
+        "select * from c where c.status = 1"
         )
-        return res.json().get("queue", [])
+        items = list(con_song.query_items(query=query, enable_cross_partition_query=True))
+        return items
     except Exception as e:
         print("获取队列失败：", e)
         return []
@@ -408,23 +372,19 @@ def fetch_queue():
 def fetch_url(song_id):
     """获取歌曲播放链接"""
     try:
-        res = requests.get(f"{API_BASE}/api/geturl?id={song_id}", timeout=8)
+        res = requests.get(f"{API_BASE}/song/url?id={song_id}", timeout=8)
         data = res.json().get("data", {})
-        return data.get("url")
+        return data[0].get("url")
     except Exception as e:
         print("获取播放链接失败：", e)
         return None
 
-def mark_played(request_id):
+def mark_played(request):
     """标记歌曲为已播放"""
     try:
-        res = requests.post(
-            f"{API_BASE}/api/player/played",
-            json={"request_id": request_id},
-            timeout=8,
-            headers=_player_headers()
-        )
-        return res.json().get("success", False)
+        request["status"] = 3
+        con_song.upsert_item(request)
+        return True
     except Exception as e:
         print("标记已播放失败：", e)
         return False
