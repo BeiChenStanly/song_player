@@ -373,8 +373,10 @@ def fetch_queue():
 def fetch_url(song_id):
     """获取歌曲播放链接"""
     try:
-        res = requests.get(f"{API_BASE}/song/url?id={song_id}&&cookie={COOKIE}", timeout=8)
+        res = requests.get(f"{API_BASE}/song/url/v1?id={song_id}&level=standard&cookie={COOKIE}", timeout=8)
         data = res.json().get("data", {})
+        if data[0].get("type") != "mp3":
+            return None
         return data[0].get("url")
     except Exception as e:
         print("获取播放链接失败：", e)
