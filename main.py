@@ -339,7 +339,7 @@ class MusicPlayer:
             time.sleep(1.5)
             
             media_title = media.get_meta(vlc.Meta.Title) or f"歌曲 #{song['sid']}"
-            self.root.after(0, lambda: self.now_playing_var.set(f"正在播放: {media_title}"))
+            self.root.after(0, lambda: self.now_playing_var.set(f"正在播放: {self.current_song['name']}"))
             self.root.after(0, lambda: self.status_var.set("播放中"))
             
             # 短暂等待，避免CPU过度使用
@@ -362,7 +362,7 @@ def fetch_queue():
     """获取待播放队列"""
     try:
         query = (
-        "select * from c where c.status = 1"
+        "SELECT * FROM c WHERE c.status = 1 ORDER BY c.submit_time ASC"
         )
         items = list(con_song.query_items(query=query, enable_cross_partition_query=True))
         return items
