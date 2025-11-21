@@ -17,6 +17,7 @@ AWARD_MUSIC_PATH = os.path.join(script_dir, "award.mp3")
 endpoint = os.getenv('ENDPOINT')
 key = os.getenv('KEY')
 API_BASE = os.getenv('API_BASE')
+COOKIE = os.getenv('COOKIE')
 client = CosmosClient(endpoint, key)
 
 database = client.create_database_if_not_exists(id="ours")
@@ -372,7 +373,7 @@ def fetch_queue():
 def fetch_url(song_id):
     """获取歌曲播放链接"""
     try:
-        res = requests.get(f"{API_BASE}/song/url?id={song_id}", timeout=8)
+        res = requests.get(f"{API_BASE}/song/url?id={song_id}&&cookie={COOKIE}", timeout=8)
         data = res.json().get("data", {})
         return data[0].get("url")
     except Exception as e:
