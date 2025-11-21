@@ -1,3 +1,4 @@
+import re
 import requests
 import time
 import vlc
@@ -26,6 +27,7 @@ con_song = database.create_container_if_not_exists(
 )
 class MusicPlayer:
     def __init__(self, root):
+        os.mkdir('temp') if not os.path.exists('temp') else None
         self.root = root
         self.root.title("校园点歌系统播放器")
         self.root.geometry("500x300")
@@ -37,7 +39,7 @@ class MusicPlayer:
             pass  # 如果没有图标文件，忽略错误
         
         # VLC实例
-        self.instance = vlc.Instance('--no-video')
+        self.instance:vlc.Instance = vlc.Instance('--no-video')
         self.player = self.instance.media_player_new()
         
         # 播放状态变量
@@ -254,6 +256,7 @@ class MusicPlayer:
             
             # 标记为已播放
             mark_played(self.current_song)
+            os.remove(f'temp/{self.current_song["sid"]}.{self.current_song["song_type"]}') if os.path.exists(f'temp/{self.current_song["sid"]}.{self.current_song["song_type"]}') else None
             self.current_song = None
     
     def refresh_queue(self):
@@ -292,7 +295,7 @@ class MusicPlayer:
                 # 如果播放结束，移除当前歌曲并继续
                 if state in [vlc.State.Ended, vlc.State.Stopped, vlc.State.Error]:
                     mark_played(self.current_song)
-                    
+                    os.remove(f'temp/{self.current_song["sid"]}.{self.current_song["song_type"]}') if os.path.exists(f'temp/{self.current_song["sid"]}.{self.current_song["song_type"]}') else None
                     self.current_song = None
                     self.root.after(0, lambda: self.now_playing_var.set("等待下一首..."))
                     time.sleep(1)
@@ -315,7 +318,7 @@ class MusicPlayer:
             self.root.after(0, lambda: self.status_var.set(f"正在加载歌曲 ID: {song['sid']}"))
             
             # 获取播放地址
-            url = fetch_url(song["sid"])
+            url, song_type = fetch_url(song["sid"])
             
             if not url:
                 # 无法获取播放地址，标记已播放并跳过
@@ -326,10 +329,12 @@ class MusicPlayer:
             
             # 播放歌曲
             self.current_song = song
+            self.current_song["song_type"] = song_type
             self.playback_position = 0
             
             # 创建播放媒体
-            media = self.instance.media_new(url)
+            # media = self.instance.media_new(url)
+            media = self.instance.media_new_path(url)
             self.player.set_media(media)
             self.player.play()
             self.is_playing = True
@@ -373,9 +378,19 @@ def fetch_queue():
 def fetch_url(song_id):
     """获取歌曲播放链接"""
     try:
-        res = requests.get(f"{API_BASE}/song/url?id={song_id}&&cookie={COOKIE}", timeout=8)
+        res = requests.get(f"{API_BASE}/song/url/v1?id={song_id}&level=exhigh&cookie={COOKIE}", timeout=8)
         data = res.json().get("data", {})
-        return data[0].get("url")
+        url = data[0].get("url")
+        song_type = data[0].get("type")
+        if song_type != "mp3" and song_type != "flac":
+            print("不支持的音频格式：", song_type)
+            return None
+        music_res = requests.get(url, timeout=8)
+        # 保存到临时文件
+        temp_path = os.path.join('temp', f"{song_id}.{song_type}")
+        with open(temp_path, 'wb') as f:
+            f.write(music_res.content)
+        return temp_path,song_type
     except Exception as e:
         print("获取播放链接失败：", e)
         return None
